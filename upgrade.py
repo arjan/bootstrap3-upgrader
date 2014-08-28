@@ -10,13 +10,13 @@ import os
 
 class Element(object):
 
-    def __init__(self, data, start, startTag="<", endTag=">"):
+    def __init__(self, data, start, refpos, startTag="<", endTag=">"):
         self.data = data    
         if self.data[start:start+len(startTag)] != startTag:
             raise Error("Invalid element in data")
 
         self.tagStart = start
-        self.tagEnd = start + 1 + data[start:].find(endTag)
+        self.tagEnd = refpos + 1 + data[refpos:].find(endTag)
         
         self.dataPre = self.data[:start]
         self.dataPost = self.data[self.tagEnd:]
@@ -51,7 +51,7 @@ class Element(object):
         else:
             self.template = startTag.replace("%", "%%")+"%(tagName)s" + self.innerTag[len(startTag)+len(self.tagName):].replace("%", "%%")
             m = re.search('.*(\s+)class="', self.template)
-            self.spaceAdd = m.groups()[0]
+            self.spaceAdd = m and m.groups()[0] or " "
             self.template = re.sub('\s+class="' + origClass + '"', "%(classes)s", self.template)
         #print "__"+self.tagName, startTag, self.template
         
@@ -99,7 +99,7 @@ class Element(object):
         else:
             startTag = "<"
             endTag = ">"
-        e = Element(orig, offset+tagStart, startTag, endTag)
+        e = Element(orig, offset+tagStart, offset+startPos, startTag, endTag)
         e.patternGroups = m.groups()    
         return e
 
@@ -113,7 +113,7 @@ class Element(object):
         return self.tagStart, self.tagStart + len(elem), self.dataPre + elem + self.dataPost
         
 def transformGrid(e):
-    e.removeClass("container-fluid")
+    e.replaceClass("container-fluid", "container")
     e.replaceClass("row-fluid", "row")
 
     prefix = None
@@ -153,11 +153,16 @@ def transformNavbar(e):
     # Replace .navbar-inner with .container
     e.replaceClass("navbar-inner", "container")
 
+    if "nav-header" in orig and e.tagName == "li":
+        e.classes = ["dropdown-header"]
+        
+    if "dropdown-menu" in orig:
+        e.classes = ["dropdown-menu"]
+
     # Replace .navbar .nav with .navbar-nav
-    if "nav" in orig:
-        e.removeClass("nav")
+    if "nav" in orig and Element.fromString(e.dataPre, ".*(navbar)[^<]*") is not None:
         e.removeClass("navbar")
-        e.classes.append("navbar-nav")
+        e.addClass("navbar-nav")
 
     # .brand is now .navbar-brand
     e.replaceClass("brand", "navbar-brand")
