@@ -100,7 +100,6 @@ class Element(object):
         else:
             classes=" class=\"%s\"" % (" ".join(self.classes) + self.tplExpr)
         d = {'tagName': self.tagName, 'classes': classes}
-        print self.template    
         elem = (self.template % d)
         return self.tagStart, self.tagStart + len(elem), self.dataPre + elem + self.dataPost
         
@@ -131,8 +130,11 @@ def transformForms(e):
         e.removeClass("inline")
         e.classes.append("checkbox-inline")
         
-
-    # Add column widths to horizontal form labels and .controls
+    sizes = {'mini': '2', 'small': '4', 'medium': '6', 'large': '8'}
+    for old, new in sizes.iteritems():
+        cls = "input-" + old
+        if cls in e.classes:
+            e.removeClass(cls).addClass("col-md-" + new)
         
 
 def transformNavbar(e):
@@ -165,7 +167,10 @@ def transformNavbar(e):
 
     # .nav-collapse is now .navbar-collapse
     e.replaceClass("nav-collapse", "navbar-collapse")
+    e.replaceClass("nav-toggle", "navbar-toggle")
+    e.replaceClass("btn-navbar", "navbar-btn")
 
+    
     # FIXME .navbar-brand, .navbar-toggle are wrapped by .navbar-header
     # FIXME .navbar:not(.navbar-inverse) is now .navbar.navbar-default
 
@@ -203,7 +208,42 @@ def transformIcons(e):
         e.replaceClass(icon, "glyphicon")                
         e.addClassAfter("glyphicon", "glyph"+icon)
 
-transformers = [transformGrid, transformForms, transformNavbar, transformButtons, transformIcons]
+
+def transformMisc(e):
+    e.replaceClass("hero-unit", "jumbotron")
+    e.replaceClass("alert-error", "alert-danger")
+    e.replaceClass("muted", "text-muted")
+    if e.tagName == "ul":
+        e.replaceClass("unstyled", "list-unstyled")
+        e.replaceClass("inline", "list-inline")
+
+    if "label" in e.classes:
+        found = False
+        for c in e.classes:
+            if c[:6] == "label-":
+                found = True
+        if not(found):
+            e.addClass("label-default")
+    e.replaceClass("label-important", "label-danger")
+
+    e.replaceClass("img-polariod", "img-thumbnail")
+    
+    e.replaceClass("accordion", "panel-group")
+    e.replaceClass("accordion-group", "panel-default")
+    e.replaceClass("accordion-heading", "panel-heading")
+    e.replaceClass("accordion-body", "panel-collapse")
+    e.replaceClass("accordion-inner", "panel-body")
+
+    e.replaceClass("bar", "progress-bar")
+    for c in e.classes:
+        if c[:4] == "bar-":
+            e.replaceClass(c, "progress-" + c)
+
+    e.replaceClass("pill-content", "tab-content")
+    e.replaceClass("pill-pane", "tab-pane")
+    
+    
+transformers = [transformGrid, transformForms, transformNavbar, transformButtons, transformIcons, transformMisc]
 
 def upgrade(data):
     cursor = 0
@@ -218,7 +258,7 @@ def upgrade(data):
     # Add form-control to every input
     cursor = 0
     while True:
-        e = Element.fromString(data, ".*?<(input|textarea)", cursor)
+        e = Element.fromString(data, ".*?<(input|textarea|select)", cursor)
         if e is None:
             break
         #  Add form-control class to inputs and selects
