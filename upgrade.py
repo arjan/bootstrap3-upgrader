@@ -6,20 +6,103 @@ import os
 
 class Element(object):
 
-    def __init__(self, tag, classes):
-        self.tag = tag
-        self.classes = classes
+    def __init__(self, data, start, startTag="<", endTag=">"):
+        self.data = data    
+        if self.data[start:start+len(startTag)] != startTag:
+            raise Error("Invalid element in data")
 
+        self.tagStart = start
+        self.tagEnd = start + 1 + data[start:].find(endTag)
+        
+        self.dataPre = self.data[:start]
+        self.dataPost = self.data[self.tagEnd:]
+        
+        self.innerTag = data[start:self.tagEnd]
+        m = re.search('^(' + startTag + '\s*)([a-zA-z\-_]+)', self.innerTag, re.DOTALL)
+        startTag = m.groups()[0]
+        self.tagName = m.groups()[1]
+        
+        classRe = re.compile('\s+class="(.*?)"', re.DOTALL)
+        m = classRe.search(data, start)
+
+        if m is None or m.start() > self.tagEnd:
+            self.tplExpr = ""
+            self.classes = None
+        else:
+            origClass = m.groups()[0]
+            m = re.search('({%.*%})', origClass, re.DOTALL)
+            if m:
+                self.tplExpr = m.groups()[0]
+                classes = origClass.replace(self.tplExpr, "")
+                self.tplExpr = " " + self.tplExpr
+            else:
+                self.tplExpr = ""
+                classes = origClass.strip()
+            self.classes = [x for x in re.split("[ ]+", classes) if x != '']
+
+        if self.classes is None:
+            self.template = startTag.replace("%", "%%")+"%(tagName)s%(classes)s" + self.innerTag[len(startTag)+len(self.tagName):].replace("%", "%%")
+            self.classes = []
+        else:
+            self.template = startTag.replace("%", "%%")+"%(tagName)s" + self.innerTag[len(startTag)+len(self.tagName):].replace("%", "%%")
+            self.template = re.sub('\s+class="' + origClass + '"', "%(classes)s", self.template)
+        #print "__"+self.tagName, startTag, self.template
+        
     def replaceClass(self, a, b):
         self.classes = [b if x == a else x for x in self.classes]
-
+        return self
+        
     def removeClass(self, a):
         self.classes = [x for x in self.classes if x != a]
-
+        return self
+        
     def addClassAfter(self, a, b):
+        if b in self.classes:
+            return self
         n = self.classes.index(a)+1
         self.classes = self.classes[0:n] + [b] + self.classes[n:]
+        return self
 
+    def addClass(self, a):
+        if a in self.classes:
+            return self
+        self.classes.append(a)
+        return self
+
+    def tag(self, t):
+        self.tagName = t
+        return self
+        
+    @classmethod
+    def fromString(x, orig, pattern, offset=0):
+        data = orig[offset:]
+        m = re.search(pattern, data, re.DOTALL)
+        if not m:
+            return None
+        startPos = m.start(1)
+        # now search left until start of tag    
+        tagStart = data[:startPos].rfind("<")
+        tplTagStart = data[:startPos].rfind("{%")
+        if tagStart == -1 and tplTagStart == -1:
+            return None
+        if tagStart == -1 or tagStart < tplTagStart:
+            tagStart = tplTagStart
+            startTag = "{%"
+            endTag = "%}"
+        else:
+            startTag = "<"
+            endTag = ">"
+        return Element(orig, offset+tagStart, startTag, endTag)    
+
+    def output(self):
+        if self.classes is None or not(len(self.classes)):
+            classes=""
+        else:
+            classes=" class=\"%s\"" % (" ".join(self.classes) + self.tplExpr)
+        d = {'tagName': self.tagName, 'classes': classes}
+        print self.template    
+        elem = (self.template % d)
+        return self.tagStart, self.tagStart + len(elem), self.dataPre + elem + self.dataPost
         
 def transformGrid(e):
     e.removeClass("container-fluid")
@@ -48,9 +131,6 @@ def transformForms(e):
         e.removeClass("inline")
         e.classes.append("checkbox-inline")
         
-    #  Add form-control class to inputs and selects
-    if e.tag == "input":
-        e.classes.append("form-control")
 
     # Add column widths to horizontal form labels and .controls
         
@@ -112,7 +192,7 @@ def transformButtons(e):
             e.replaceClass(t + "-" + old, t + "-" + new)
 
 
-def transformIcons(classes):
+def transformIcons(e):
     e.removeClass("icon-white")
     icon = None
     for c in e.classes:
@@ -125,42 +205,31 @@ def transformIcons(classes):
 
 transformers = [transformGrid, transformForms, transformNavbar, transformButtons, transformIcons]
 
-for line in sys.stdin.readlines():
-    if line[-1] == "\n":
-        line = line[:-1]
+def upgrade(data):
+    cursor = 0
+    while True:
+        e = Element.fromString(data, ".*?(class=)", cursor)
+        if e is None:
+            break
+        for f in transformers:
+            f(e)
+        (start, cursor, data) = e.output()
+#    return data
+    # Add form-control to every input
+    cursor = 0
+    while True:
+        e = Element.fromString(data, ".*?<(input|textarea)", cursor)
+        if e is None:
+            break
+        #  Add form-control class to inputs and selects
+        if 'type="radio"' not in e.innerTag and 'type="checkbox"' not in e.innerTag:
+            e.addClass("form-control")
+        (start, cursor, data) = e.output()
         
-    m = re.search(' class\=\"(.*?)\"', line)
-    if not m:
-        print line
-        continue
-    origClass = m.groups()[0]
-    m = re.search('({%.*%})', origClass)
-    if m:
-        tplExpr = m.groups()[0]
-        classes = origClass.replace(tplExpr, "")
-    else:
-        tplExpr = ""
-        classes = origClass.strip()
-    classes = re.split("[ ]+", classes)
-    if classes == ['']:
-        print line
-        continue
-
-    part = line[:line.find("class=")]
-    part = part[part.rfind("<")+1:]
-    tag = part[:part.find(" ")]
-    
-    e = Element(tag, classes)
-    for f in transformers:
-        f(e)
-    newClass = (" ".join(e.classes) + " " + tplExpr).strip()
-    line = line.replace(origClass, newClass)
-    line = line.replace(" class=\"\"", "")
-    print line
-
-
-
-
-
-
-
+    return data
+        
+if __name__ == "__main__":
+    print upgrade(sys.stdin.read()),
+    #print upgrade('<input class="">')
+    #print Element.fromString("dd <input type=\"text\" class=\"{% if foo %}dd{% endif %} y\"> foo bar class=\"d\"", ".*?(type=)").addClass("bar").output()
+    #print Element.fromString("dd <input type=\"text\"> foo bar class=\"d\"", ".*?(type=)").tag("foo").addClass("foo").output()
