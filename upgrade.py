@@ -4,6 +4,10 @@ import re
 import sys
 import os
 
+
+# missing:
+# - navbar
+
 class Element(object):
 
     def __init__(self, data, start, startTag="<", endTag=">"):
@@ -43,8 +47,11 @@ class Element(object):
         if self.classes is None:
             self.template = startTag.replace("%", "%%")+"%(tagName)s%(classes)s" + self.innerTag[len(startTag)+len(self.tagName):].replace("%", "%%")
             self.classes = []
+            self.spaceAdd = " "
         else:
             self.template = startTag.replace("%", "%%")+"%(tagName)s" + self.innerTag[len(startTag)+len(self.tagName):].replace("%", "%%")
+            m = re.search('.*(\s+)class="', self.template)
+            self.spaceAdd = m.groups()[0]
             self.template = re.sub('\s+class="' + origClass + '"', "%(classes)s", self.template)
         #print "__"+self.tagName, startTag, self.template
         
@@ -92,13 +99,15 @@ class Element(object):
         else:
             startTag = "<"
             endTag = ">"
-        return Element(orig, offset+tagStart, startTag, endTag)    
+        e = Element(orig, offset+tagStart, startTag, endTag)
+        e.patternGroups = m.groups()    
+        return e
 
     def output(self):
         if self.classes is None or not(len(self.classes)):
             classes=""
         else:
-            classes=" class=\"%s\"" % (" ".join(self.classes) + self.tplExpr)
+            classes=self.spaceAdd + "class=\"%s\"" % (" ".join(self.classes) + self.tplExpr)
         d = {'tagName': self.tagName, 'classes': classes}
         elem = (self.template % d)
         return self.tagStart, self.tagStart + len(elem), self.dataPre + elem + self.dataPost
@@ -145,7 +154,7 @@ def transformNavbar(e):
     e.replaceClass("navbar-inner", "container")
 
     # Replace .navbar .nav with .navbar-nav
-    if "navbar" in orig and "nav" in orig:
+    if "nav" in orig:
         e.removeClass("nav")
         e.removeClass("navbar")
         e.classes.append("navbar-nav")
@@ -153,23 +162,22 @@ def transformNavbar(e):
     # .brand is now .navbar-brand
     e.replaceClass("brand", "navbar-brand")
 
-    # .navbar.pull-left is now .navbar-left
-    if "navbar" in orig and "pull-left" in orig:
-        e.removeClass("pull-left")
-        e.removeClass("navbar")
-        e.classes.append("navbar-left")
+    # .navbar. pull-left is now .navbar-left
+    # if "pull-left" in orig and e.parentContainsClass(":
+    #     e.removeClass("pull-left")
+    #     e.removeClass("navbar")
+    #     e.classes.append("navbar-left")
         
-    # .navbar.pull-right is now .navbar-right
-    if "navbar" in orig and "pull-right" in orig:
-        e.removeClass("pull-right")
-        e.removeClass("navbar")
-        e.classes.append("navbar-right")
+    # # .navbar.pull-right is now .navbar-right
+    # if "navbar" in orig and "pull-right" in orig:
+    #     e.removeClass("pull-right")
+    #     e.removeClass("navbar")
+    #     e.classes.append("navbar-right")
 
     # .nav-collapse is now .navbar-collapse
     e.replaceClass("nav-collapse", "navbar-collapse")
     e.replaceClass("nav-toggle", "navbar-toggle")
     e.replaceClass("btn-navbar", "navbar-btn")
-
     
     # FIXME .navbar-brand, .navbar-toggle are wrapped by .navbar-header
     # FIXME .navbar:not(.navbar-inverse) is now .navbar.navbar-default
@@ -177,10 +185,11 @@ def transformNavbar(e):
     
 def transformButtons(e):
     # Add btn-default to btn elements with no other color.
+    colors = "primary,success,info,warning,danger,link".split(",")
     if "btn" in e.classes:
         hasColor = False
         for c in e.classes:
-            if c[:4] == "btn-":
+            if c[:4] == "btn-" and c[4:] in colors:
                 hasColor = True
                 break
         if not hasColor:
@@ -262,8 +271,37 @@ def upgrade(data):
         if e is None:
             break
         #  Add form-control class to inputs and selects
-        if 'type="radio"' not in e.innerTag and 'type="checkbox"' not in e.innerTag:
+        if 'type="radio"' not in e.innerTag and 'type="checkbox"' not in e.innerTag and 'type="hidden"' not in e.innerTag:
             e.addClass("form-control")
+        (start, cursor, data) = e.output()
+
+    # process radio and checkboxes
+    cursor = 0
+    while True:
+        e = Element.fromString(data, ".*?<(input)[^<>]*?type=\"(radio|checkbox)", cursor)
+        if e is None:
+            break
+
+        # find first label
+        labelElem = Element.fromString(e.dataPre, ".*<(label)")
+        if labelElem is None or "checkbox-inline" in labelElem.classes or "radio-inline" in labelElem.classes or re.match(".*</label", labelElem.dataPost):
+            cursor = e.tagEnd
+            continue
+
+        tpe = e.patternGroups[1]
+        labelElem.removeClass(tpe)
+        # try to find a stray <div> before the label
+        divElem = Element.fromString(labelElem.dataPre, ".*<(div)>[^<]*$")
+
+        if divElem is None:
+            labelElem.dataPre += "<div class=\"%s\">" % tpe
+            (_, _, e.dataPre) = labelElem.output()
+            e.dataPost = e.dataPost.replace("</label>", "</label></div>", 1)
+        else:
+            divElem.addClass(tpe)
+            (_, _, labelElem.dataPre) = divElem.output()
+            (_, _, e.dataPre) = labelElem.output()
+            
         (start, cursor, data) = e.output()
         
     return data
